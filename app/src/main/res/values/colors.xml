@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="default_dial_color">#2E4A3E</color>
+    <color name="silver_bezel">#C0C0C0</color>
+    <color name="silver_highlight">#E8E8E8</color>
+    <color name="silver_shadow">#808080</color>
+    <color name="hand_color">#D4D4D4</color>
+    <color name="second_hand_color">#FFFFFF</color>
+    <color name="fenton_red">#FF0000</color>
+    <color name="date_bg">#E0E0E0</color>
+    <color name="date_text">#000000</color>
+</resources>
