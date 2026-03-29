@@ -32,7 +32,7 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
         const val INTERACTIVE_UPDATE_RATE_MS = 1000L
         const val PREFS_NAME = "fenton_watchface_prefs"
         const val KEY_DIAL_COLOR = "dial_color"
-        const val DEFAULT_DIAL_COLOR = 0xFF2E4A3E.toInt() // dark green
+        const val DEFAULT_DIAL_COLOR = 0xFF2E4A3E.toInt()
     }
 
     override fun onCreateEngine(): Engine = FentonEngine()
@@ -58,15 +58,13 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
         private var centerY = 0f
         private var radius = 0f
 
-        // Colors
         private var dialColor = DEFAULT_DIAL_COLOR
         private val silverColor = 0xFFC0C0C0.toInt()
         private val silverHighlight = 0xFFE8E8E8.toInt()
         private val silverShadow = 0xFF808080.toInt()
         private val darkSilver = 0xFF999999.toInt()
-        private val fentonRed = 0xFFFF0000.toInt()
+        private val fentonRed = 0xFFCC0000.toInt()
 
-        // Paints
         private lateinit var dialPaint: Paint
         private lateinit var dialGradientPaint: Paint
         private lateinit var dialMetallicPaint: Paint
@@ -87,14 +85,13 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
         private lateinit var ambientPaint: Paint
         private lateinit var subDialTextPaint: Paint
 
-        // Sound
         private var soundPool: SoundPool? = null
         private var tickSoundId = 0
         private var soundEnabled = true
         private var lastTickSecond = -1
 
-        // Accelerometer-driven light angle for real-time metallic effect
         private var lightAngle = 315f
+        private var lightTilt = 0.5f
         private var sensorManager: SensorManager? = null
         private var accelerometer: Sensor? = null
         private val sensorListener = object : SensorEventListener {
@@ -102,11 +99,14 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
                 if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
                     val x = event.values[0]
                     val y = event.values[1]
-                    // Map accelerometer tilt to light angle
+                    val z = event.values[2]
                     val newAngle = (Math.toDegrees(atan2(y.toDouble(), x.toDouble())).toFloat() + 360f) % 360f
-                    // Smooth the transition
-                    lightAngle = lightAngle + 0.3f * ((newAngle - lightAngle + 540f) % 360f - 180f)
+                    val gravity = sqrt((x * x + y * y + z * z).toDouble()).toFloat()
+                    val tiltRatio = if (gravity > 0.1f) sqrt((x * x + y * y).toDouble()).toFloat() / gravity else 0f
+                    val newTilt = (1f - tiltRatio).coerceIn(0f, 1f)
+                    lightAngle = lightAngle + 0.5f * ((newAngle - lightAngle + 540f) % 360f - 180f)
                     lightAngle = (lightAngle + 360f) % 360f
+                    lightTilt = lightTilt + 0.4f * (newTilt - lightTilt)
                     if (!isAmbient) {
                         invalidate()
                     }
@@ -128,17 +128,14 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
 
         override fun onCreate(holder: SurfaceHolder) {
             super.onCreate(holder)
-
             setWatchFaceStyle(
                 WatchFaceStyle.Builder(this@FentonWatchFaceService)
                     .setAcceptsTapEvents(true)
                     .build()
             )
-
             calendar = Calendar.getInstance()
             prefs = getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
             dialColor = prefs.getInt(KEY_DIAL_COLOR, DEFAULT_DIAL_COLOR)
-
             initPaints()
             initSound()
             initSensor()
@@ -150,63 +147,44 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
         }
 
         private fun initPaints() {
-            // Main dial background
             dialPaint = Paint().apply {
                 color = dialColor
                 isAntiAlias = true
                 style = Paint.Style.FILL
             }
-
             dialGradientPaint = Paint().apply {
                 isAntiAlias = true
                 style = Paint.Style.FILL
             }
-
             dialMetallicPaint = Paint().apply {
                 isAntiAlias = true
                 style = Paint.Style.FILL
-                alpha = 140  // semi-transparent metallic overlay
+                alpha = 200
             }
-
-            // Hour markers
             hourMarkerPaint = Paint().apply {
                 color = silverHighlight
                 isAntiAlias = true
-                style = Paint.Style.STROKE
-                strokeWidth = 4f
-                strokeCap = Paint.Cap.ROUND
+                style = Paint.Style.FILL
             }
-
-            // Minute tick markers
             minuteMarkerPaint = Paint().apply {
                 color = silverColor
                 isAntiAlias = true
                 style = Paint.Style.STROKE
                 strokeWidth = 1.5f
-                strokeCap = Paint.Cap.ROUND
+                strokeCap = Paint.Cap.BUTT
             }
-
-            // Hour hand
             hourHandPaint = Paint().apply {
                 color = silverHighlight
                 isAntiAlias = true
-                style = Paint.Style.STROKE
-                strokeWidth = 6f
-                strokeCap = Paint.Cap.ROUND
-                setShadowLayer(3f, 1f, 1f, 0x80000000.toInt())
+                style = Paint.Style.FILL
+                setShadowLayer(4f, 2f, 2f, 0xAA000000.toInt())
             }
-
-            // Minute hand
             minuteHandPaint = Paint().apply {
                 color = silverHighlight
                 isAntiAlias = true
-                style = Paint.Style.STROKE
-                strokeWidth = 4f
-                strokeCap = Paint.Cap.ROUND
-                setShadowLayer(3f, 1f, 1f, 0x80000000.toInt())
+                style = Paint.Style.FILL
+                setShadowLayer(4f, 2f, 2f, 0xAA000000.toInt())
             }
-
-            // Second hand
             secondHandPaint = Paint().apply {
                 color = Color.WHITE
                 isAntiAlias = true
@@ -214,16 +192,12 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
                 strokeWidth = 1.5f
                 strokeCap = Paint.Cap.ROUND
             }
-
-            // Center circle
             handCenterPaint = Paint().apply {
                 color = silverHighlight
                 isAntiAlias = true
                 style = Paint.Style.FILL
-                setShadowLayer(2f, 0f, 0f, 0x80000000.toInt())
+                setShadowLayer(3f, 0f, 0f, 0xAA000000.toInt())
             }
-
-            // General text
             textPaint = Paint().apply {
                 color = silverColor
                 isAntiAlias = true
@@ -231,43 +205,34 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
                 textAlign = Paint.Align.CENTER
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             }
-
-            // FENTON text (white part)
             fentonTextPaint = Paint().apply {
                 color = Color.WHITE
                 isAntiAlias = true
                 textSize = 16f
                 textAlign = Paint.Align.LEFT
                 typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
-                letterSpacing = 0.15f
+                letterSpacing = 0.12f
             }
-
-            // FENTON red F
             fentonRedPaint = Paint().apply {
-                color = fentonRed
+                color = Color.WHITE
                 isAntiAlias = true
                 textSize = 16f
-                textAlign = Paint.Align.LEFT
+                textAlign = Paint.Align.CENTER
                 typeface = Typeface.create(Typeface.SERIF, Typeface.BOLD)
-                letterSpacing = 0.15f
             }
-
-            // Sub-dial
             subDialPaint = Paint().apply {
                 color = adjustAlpha(dialColor, 200)
                 isAntiAlias = true
                 style = Paint.Style.STROKE
                 strokeWidth = 1.5f
             }
-
             subDialMarkerPaint = Paint().apply {
                 color = silverColor
                 isAntiAlias = true
                 style = Paint.Style.STROKE
                 strokeWidth = 1f
-                strokeCap = Paint.Cap.ROUND
+                strokeCap = Paint.Cap.BUTT
             }
-
             subDialHandPaint = Paint().apply {
                 color = silverHighlight
                 isAntiAlias = true
@@ -275,7 +240,6 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
                 strokeWidth = 1.5f
                 strokeCap = Paint.Cap.ROUND
             }
-
             subDialTextPaint = Paint().apply {
                 color = silverColor
                 isAntiAlias = true
@@ -283,14 +247,11 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
                 textAlign = Paint.Align.CENTER
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.NORMAL)
             }
-
-            // Date box
             dateBoxPaint = Paint().apply {
-                color = 0xFFE0E0E0.toInt()
+                color = 0xFFE8E8E8.toInt()
                 isAntiAlias = true
                 style = Paint.Style.FILL
             }
-
             dateTextPaint = Paint().apply {
                 color = Color.BLACK
                 isAntiAlias = true
@@ -298,8 +259,6 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
                 textAlign = Paint.Align.CENTER
                 typeface = Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
             }
-
-            // Ambient mode paint
             ambientPaint = Paint().apply {
                 color = Color.WHITE
                 isAntiAlias = false
@@ -313,13 +272,10 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
                 .setUsage(AudioAttributes.USAGE_ASSISTANCE_SONIFICATION)
                 .setContentType(AudioAttributes.CONTENT_TYPE_SONIFICATION)
                 .build()
-
             soundPool = SoundPool.Builder()
                 .setMaxStreams(1)
                 .setAudioAttributes(audioAttrs)
                 .build()
-
-            // We'll generate a tick sound programmatically
             tickSoundId = generateTickSound()
         }
 
@@ -329,8 +285,6 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
                 val durationMs = 15
                 val numSamples = sampleRate * durationMs / 1000
                 val samples = ShortArray(numSamples)
-
-                // Create a short click/tick sound
                 for (i in samples.indices) {
                     val t = i.toFloat() / sampleRate
                     val envelope = (1.0 - i.toFloat() / numSamples).pow(3)
@@ -338,31 +292,25 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
                             sin(2.0 * Math.PI * 7000.0 * t) * 0.3
                     samples[i] = (wave * envelope * Short.MAX_VALUE * 0.5).toInt().toShort()
                 }
-
-                // Write to temp file as WAV
                 val tempFile = java.io.File(cacheDir, "tick.wav")
                 val byteBuffer = java.nio.ByteBuffer.allocate(44 + numSamples * 2)
                     .order(java.nio.ByteOrder.LITTLE_ENDIAN)
-
-                // WAV header
                 byteBuffer.put("RIFF".toByteArray())
                 byteBuffer.putInt(36 + numSamples * 2)
                 byteBuffer.put("WAVE".toByteArray())
                 byteBuffer.put("fmt ".toByteArray())
-                byteBuffer.putInt(16) // chunk size
-                byteBuffer.putShort(1) // PCM
-                byteBuffer.putShort(1) // mono
-                byteBuffer.putInt(sampleRate) // sample rate
-                byteBuffer.putInt(sampleRate * 2) // byte rate
-                byteBuffer.putShort(2) // block align
-                byteBuffer.putShort(16) // bits per sample
+                byteBuffer.putInt(16)
+                byteBuffer.putShort(1)
+                byteBuffer.putShort(1)
+                byteBuffer.putInt(sampleRate)
+                byteBuffer.putInt(sampleRate * 2)
+                byteBuffer.putShort(2)
+                byteBuffer.putShort(16)
                 byteBuffer.put("data".toByteArray())
                 byteBuffer.putInt(numSamples * 2)
-
                 for (sample in samples) {
                     byteBuffer.putShort(sample)
                 }
-
                 tempFile.writeBytes(byteBuffer.array())
                 return soundPool?.load(tempFile.absolutePath, 1) ?: 0
             } catch (e: Exception) {
@@ -379,9 +327,8 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
         }
 
         private fun updateDialGradient() {
-            // Subtle radial gradient on the dial for depth
             val darkerDial = adjustBrightness(dialColor, 0.7f)
-            val lighterDial = adjustBrightness(dialColor, 1.1f)
+            val lighterDial = adjustBrightness(dialColor, 1.15f)
             dialGradientPaint.shader = RadialGradient(
                 centerX, centerY * 0.85f, radius * 0.9f,
                 intArrayOf(lighterDial, dialColor, darkerDial),
@@ -392,32 +339,27 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
         }
 
         private fun updateDialMetallic() {
-            // Metallic sweep gradient overlay on the dial that rotates with light angle
-            val dialLight = adjustBrightness(dialColor, 1.45f)
-            val dialMid = adjustBrightness(dialColor, 1.15f)
-            val dialDark = adjustBrightness(dialColor, 0.75f)
-            val dialDeep = adjustBrightness(dialColor, 0.6f)
-
+            val highlightBoost = 1.0f + lightTilt * 0.6f
+            val dialBright = adjustBrightness(dialColor, 1.8f * highlightBoost)
+            val dialLight = adjustBrightness(dialColor, 1.55f)
+            val dialMid = adjustBrightness(dialColor, 1.2f)
+            val dialDark = adjustBrightness(dialColor, 0.6f)
+            val dialDeep = adjustBrightness(dialColor, 0.4f)
             dialMetallicPaint.shader = SweepGradient(
                 centerX, centerY,
-                intArrayOf(
-                    dialDark, dialMid, dialLight, dialMid,
-                    dialDark, dialDeep, dialDark
-                ),
-                floatArrayOf(0f, 0.15f, 0.28f, 0.40f, 0.55f, 0.80f, 1f)
+                intArrayOf(dialDark, dialMid, dialLight, dialBright, dialLight, dialMid, dialDark, dialDeep, dialDark),
+                floatArrayOf(0f, 0.10f, 0.18f, 0.26f, 0.34f, 0.42f, 0.55f, 0.78f, 1f)
             ).apply {
                 val matrix = Matrix()
-                matrix.setRotate(lightAngle + 30f, centerX, centerY)
+                matrix.setRotate(lightAngle, centerX, centerY)
                 setLocalMatrix(matrix)
             }
+            dialMetallicPaint.alpha = (170 + (lightTilt * 70f).toInt()).coerceIn(170, 240)
         }
 
         override fun onDraw(canvas: Canvas, bounds: Rect) {
             calendar.timeInMillis = System.currentTimeMillis()
-
-            // Update metallic dial effect based on current light angle (driven by accelerometer)
             updateDialMetallic()
-
             if (isAmbient) {
                 drawAmbient(canvas, bounds)
             } else {
@@ -427,38 +369,18 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
         }
 
         private fun drawInteractive(canvas: Canvas, bounds: Rect) {
-            val width = bounds.width().toFloat()
-            val height = bounds.height().toFloat()
-
-            // Background: black
             canvas.drawColor(Color.BLACK)
-
-            // Draw dial background with metallic gradient
             drawDial(canvas)
-
-            // Draw minute tick marks
             drawMinuteMarks(canvas)
-
-            // Draw hour markers
             drawHourMarkers(canvas)
-
-            // Draw sub-dials
-            drawDayOfWeekSubDial(canvas) // top
-            drawSecondsSubDial(canvas) // bottom
-
-            // Draw FENTON branding
+            drawDayOfWeekSubDial(canvas)
+            drawSecondsSubDial(canvas)
             drawBranding(canvas)
-
-            // Draw date window
             drawDateWindow(canvas)
-
-            // Draw hands
             drawHands(canvas)
-
-            // Draw center dot
-            canvas.drawCircle(centerX, centerY, 5f, handCenterPaint)
-            canvas.drawCircle(centerX, centerY, 2f, Paint().apply {
-                color = Color.BLACK
+            canvas.drawCircle(centerX, centerY, 6f, handCenterPaint)
+            canvas.drawCircle(centerX, centerY, 2.5f, Paint().apply {
+                color = 0xFF333333.toInt()
                 isAntiAlias = true
                 style = Paint.Style.FILL
             })
@@ -466,76 +388,145 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
 
         private fun drawDial(canvas: Canvas) {
             val dialRadius = radius - 2f
-            // Base fill
             canvas.drawCircle(centerX, centerY, dialRadius, dialPaint)
-            // Radial depth gradient
             canvas.drawCircle(centerX, centerY, dialRadius, dialGradientPaint)
-            // Metallic sweep highlight that moves with the light angle
             canvas.drawCircle(centerX, centerY, dialRadius, dialMetallicPaint)
+            val spotAngleRad = Math.toRadians(lightAngle.toDouble())
+            val spotDist = radius * 0.3f * (1f - lightTilt)
+            val spotX = centerX + cos(spotAngleRad).toFloat() * spotDist
+            val spotY = centerY + sin(spotAngleRad).toFloat() * spotDist
+            val spotRadius = radius * (0.35f + lightTilt * 0.35f)
+            val specularPaint = Paint().apply {
+                isAntiAlias = true
+                style = Paint.Style.FILL
+                shader = RadialGradient(
+                    spotX, spotY, spotRadius,
+                    intArrayOf(
+                        adjustAlpha(Color.WHITE, (80 * (0.4f + lightTilt * 0.6f)).toInt()),
+                        adjustAlpha(Color.WHITE, (30 * (0.3f + lightTilt * 0.5f)).toInt()),
+                        Color.TRANSPARENT
+                    ),
+                    floatArrayOf(0f, 0.5f, 1f),
+                    Shader.TileMode.CLAMP
+                )
+            }
+            canvas.drawCircle(centerX, centerY, dialRadius, specularPaint)
         }
 
         private fun drawMinuteMarks(canvas: Canvas) {
-            val outerRadius = radius - 6f
-            val innerRadius = radius - 12f
+            val outerRadius = radius - 8f
+            val innerRadius = radius - 16f
             for (i in 0 until 60) {
-                if (i % 5 == 0) continue // skip hour positions
+                if (i % 5 == 0) continue
                 val angle = Math.toRadians((i * 6 - 90).toDouble())
-                val startX = centerX + cos(angle).toFloat() * innerRadius
-                val startY = centerY + sin(angle).toFloat() * innerRadius
-                val endX = centerX + cos(angle).toFloat() * outerRadius
-                val endY = centerY + sin(angle).toFloat() * outerRadius
-                canvas.drawLine(startX, startY, endX, endY, minuteMarkerPaint)
+                canvas.drawLine(
+                    centerX + cos(angle).toFloat() * innerRadius,
+                    centerY + sin(angle).toFloat() * innerRadius,
+                    centerX + cos(angle).toFloat() * outerRadius,
+                    centerY + sin(angle).toFloat() * outerRadius,
+                    minuteMarkerPaint
+                )
             }
         }
 
         private fun drawHourMarkers(canvas: Canvas) {
-            val outerRadius = radius - 6f
-            val innerRadius = radius - 20f
-
+            val outerRadius = radius - 8f
             for (i in 0 until 12) {
-                val angle = Math.toRadians((i * 30 - 90).toDouble())
-                val cos = cos(angle).toFloat()
-                val sin = sin(angle).toFloat()
-
-                val markerPaint = Paint(hourMarkerPaint).apply {
-                    strokeWidth = if (i == 0 || i == 3 || i == 6 || i == 9) 5f else 4f
+                val angleDeg = i * 30f - 90f
+                val angle = Math.toRadians(angleDeg.toDouble())
+                val cosVal = cos(angle).toFloat()
+                val sinVal = sin(angle).toFloat()
+                val isMajor = (i == 0 || i == 3 || i == 6 || i == 9)
+                val markerLength = if (isMajor) radius * 0.10f else radius * 0.07f
+                val markerWidth = if (isMajor) radius * 0.028f else radius * 0.020f
+                val innerRadius = outerRadius - markerLength
+                val midX = centerX + cosVal * (innerRadius + markerLength / 2f)
+                val midY = centerY + sinVal * (innerRadius + markerLength / 2f)
+                val halfLen = markerLength / 2f
+                val halfWid = markerWidth / 2f
+                val rotMatrix = Matrix()
+                rotMatrix.setRotate(angleDeg + 90f, midX, midY)
+                val pts = floatArrayOf(
+                    midX - halfWid, midY - halfLen,
+                    midX + halfWid, midY - halfLen,
+                    midX + halfWid, midY + halfLen,
+                    midX - halfWid, midY + halfLen
+                )
+                rotMatrix.mapPoints(pts)
+                val path = Path().apply {
+                    moveTo(pts[0], pts[1])
+                    lineTo(pts[2], pts[3])
+                    lineTo(pts[4], pts[5])
+                    lineTo(pts[6], pts[7])
+                    close()
                 }
-
-                val startX = centerX + cos * innerRadius
-                val startY = centerY + sin * innerRadius
-                val endX = centerX + cos * outerRadius
-                val endY = centerY + sin * outerRadius
-                canvas.drawLine(startX, startY, endX, endY, markerPaint)
+                val perpAngle = angle + Math.PI / 2
+                val gx1 = midX + cos(perpAngle).toFloat() * markerWidth * 2f
+                val gy1 = midY + sin(perpAngle).toFloat() * markerWidth * 2f
+                val gx2 = midX - cos(perpAngle).toFloat() * markerWidth * 2f
+                val gy2 = midY - sin(perpAngle).toFloat() * markerWidth * 2f
+                val markerPaint = Paint(hourMarkerPaint).apply {
+                    shader = LinearGradient(
+                        gx1, gy1, gx2, gy2,
+                        intArrayOf(silverShadow, silverHighlight, Color.WHITE, silverHighlight, silverShadow),
+                        floatArrayOf(0f, 0.3f, 0.5f, 0.7f, 1f),
+                        Shader.TileMode.CLAMP
+                    )
+                }
+                canvas.drawPath(path, markerPaint)
+                canvas.drawPath(path, Paint().apply {
+                    color = 0x40000000.toInt()
+                    isAntiAlias = true
+                    style = Paint.Style.STROKE
+                    strokeWidth = 0.5f
+                })
             }
         }
 
         private fun drawDayOfWeekSubDial(canvas: Canvas) {
             val subCenterX = centerX
             val subCenterY = centerY - radius * 0.30f
-            val subRadius = radius * 0.14f
-
-            // Sub-dial circle
-            val ringPaint = Paint().apply {
-                color = adjustAlpha(silverColor, 100)
+            val subRadius = radius * 0.18f
+            canvas.drawCircle(subCenterX, subCenterY, subRadius, Paint().apply {
+                color = adjustAlpha(silverColor, 120)
+                isAntiAlias = true
+                style = Paint.Style.STROKE
+                strokeWidth = 1.5f
+            })
+            canvas.drawCircle(subCenterX, subCenterY, subRadius * 0.92f, Paint().apply {
+                color = adjustAlpha(silverColor, 60)
+                isAntiAlias = true
+                style = Paint.Style.STROKE
+                strokeWidth = 0.5f
+            })
+            val tickPaint = Paint().apply {
+                color = silverColor
                 isAntiAlias = true
                 style = Paint.Style.STROKE
                 strokeWidth = 1f
             }
-            canvas.drawCircle(subCenterX, subCenterY, subRadius, ringPaint)
-
-            // Day labels
-            val days = arrayOf("S", "M", "T", "W", "T", "F", "S")
-            val currentDay = calendar.get(Calendar.DAY_OF_WEEK) - 1 // 0=Sunday
-
             for (i in 0 until 7) {
                 val angle = Math.toRadians((i * (360.0 / 7.0)) - 90.0)
-                val labelRadius = subRadius * 0.75f
+                val outerR = subRadius * 0.92f
+                val innerR = subRadius * 0.82f
+                canvas.drawLine(
+                    subCenterX + cos(angle).toFloat() * innerR,
+                    subCenterY + sin(angle).toFloat() * innerR,
+                    subCenterX + cos(angle).toFloat() * outerR,
+                    subCenterY + sin(angle).toFloat() * outerR,
+                    tickPaint
+                )
+            }
+            val days = arrayOf("S", "M", "T", "W", "T", "F", "S")
+            val currentDay = calendar.get(Calendar.DAY_OF_WEEK) - 1
+            for (i in 0 until 7) {
+                val angle = Math.toRadians((i * (360.0 / 7.0)) - 90.0)
+                val labelRadius = subRadius * 0.65f
                 val x = subCenterX + cos(angle).toFloat() * labelRadius
                 val y = subCenterY + sin(angle).toFloat() * labelRadius
-
                 val dayPaint = Paint(subDialTextPaint).apply {
-                    textSize = radius * 0.045f
-                    color = if (i == currentDay) Color.WHITE else adjustAlpha(silverColor, 150)
+                    textSize = radius * 0.052f
+                    color = if (i == currentDay) Color.WHITE else adjustAlpha(silverColor, 170)
                     typeface = if (i == currentDay)
                         Typeface.create(Typeface.DEFAULT, Typeface.BOLD)
                     else
@@ -543,8 +534,6 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
                 }
                 canvas.drawText(days[i], x, y + dayPaint.textSize / 3f, dayPaint)
             }
-
-            // Sub-dial hand pointing to current day
             val dayAngle = Math.toRadians((currentDay * (360.0 / 7.0)) - 90.0)
             val handLen = subRadius * 0.55f
             canvas.drawLine(
@@ -553,45 +542,29 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
                 subCenterY + sin(dayAngle).toFloat() * handLen,
                 subDialHandPaint
             )
-
-            // Center dot
-            canvas.drawCircle(subCenterX, subCenterY, 2f, handCenterPaint)
+            canvas.drawCircle(subCenterX, subCenterY, 2.5f, handCenterPaint)
         }
 
         private fun drawSecondsSubDial(canvas: Canvas) {
             val subCenterX = centerX
             val subCenterY = centerY + radius * 0.30f
-            val subRadius = radius * 0.14f
-
-            // Sub-dial circle
-            val ringPaint = Paint().apply {
-                color = adjustAlpha(silverColor, 100)
+            val subRadius = radius * 0.18f
+            canvas.drawCircle(subCenterX, subCenterY, subRadius, Paint().apply {
+                color = adjustAlpha(silverColor, 120)
                 isAntiAlias = true
                 style = Paint.Style.STROKE
-                strokeWidth = 1f
-            }
-            canvas.drawCircle(subCenterX, subCenterY, subRadius, ringPaint)
-
-            // Labels: 5, 10, 15, 20, 25, 30 (or 60-second markers)
-            val labels = arrayOf("5", "10", "15", "20", "25", "30")
-            for (i in labels.indices) {
-                val angle = Math.toRadians((i * 60.0) - 90.0)
-                val labelRadius = subRadius * 0.75f
-                val x = subCenterX + cos(angle).toFloat() * labelRadius
-                val y = subCenterY + sin(angle).toFloat() * labelRadius
-
-                val labelPaint = Paint(subDialTextPaint).apply {
-                    textSize = radius * 0.038f
-                    color = adjustAlpha(silverColor, 150)
-                }
-                canvas.drawText(labels[i], x, y + labelPaint.textSize / 3f, labelPaint)
-            }
-
-            // Tick marks
+                strokeWidth = 1.5f
+            })
+            canvas.drawCircle(subCenterX, subCenterY, subRadius * 0.92f, Paint().apply {
+                color = adjustAlpha(silverColor, 60)
+                isAntiAlias = true
+                style = Paint.Style.STROKE
+                strokeWidth = 0.5f
+            })
             for (i in 0 until 30) {
                 val angle = Math.toRadians((i * 12.0) - 90.0)
-                val outerR = subRadius * 0.95f
-                val innerR = if (i % 5 == 0) subRadius * 0.80f else subRadius * 0.88f
+                val outerR = subRadius * 0.92f
+                val innerR = if (i % 5 == 0) subRadius * 0.78f else subRadius * 0.85f
                 canvas.drawLine(
                     subCenterX + cos(angle).toFloat() * innerR,
                     subCenterY + sin(angle).toFloat() * innerR,
@@ -600,8 +573,17 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
                     subDialMarkerPaint
                 )
             }
-
-            // Second hand in sub-dial
+            val labels = arrayOf("5", "10", "15", "20", "25")
+            for (i in labels.indices) {
+                val angle = Math.toRadians(((i + 1) * 60.0) - 90.0)
+                val labelRadius = subRadius * 0.65f
+                val x = subCenterX + cos(angle).toFloat() * labelRadius
+                val y = subCenterY + sin(angle).toFloat() * labelRadius
+                canvas.drawText(labels[i], x, y + radius * 0.015f, Paint(subDialTextPaint).apply {
+                    textSize = radius * 0.042f
+                    color = adjustAlpha(silverColor, 170)
+                })
+            }
             val second = calendar.get(Calendar.SECOND)
             val secondAngle = Math.toRadians((second * 6.0) - 90.0)
             val handLen = subRadius * 0.65f
@@ -611,135 +593,134 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
                 subCenterY + sin(secondAngle).toFloat() * handLen,
                 subDialHandPaint
             )
-
-            canvas.drawCircle(subCenterX, subCenterY, 2f, handCenterPaint)
+            canvas.drawCircle(subCenterX, subCenterY, 2.5f, handCenterPaint)
         }
 
         private fun drawBranding(canvas: Canvas) {
-            val brandY = centerY - radius * 0.05f
-            val textSize = radius * 0.09f
-            fentonRedPaint.textSize = textSize
-            fentonTextPaint.textSize = textSize
-
-            // Measure "F"
-            val fWidth = fentonRedPaint.measureText("F")
+            val brandY = centerY + radius * 0.02f
+            val ts = radius * 0.10f
+            fentonRedPaint.textSize = ts * 0.95f
+            fentonTextPaint.textSize = ts
+            val fCharWidth = fentonRedPaint.measureText("F")
+            val boxPadH = ts * 0.18f
+            val fBoxWidth = fCharWidth + boxPadH * 2f
             val entonWidth = fentonTextPaint.measureText("ENTON")
-            val totalWidth = fWidth + entonWidth
+            val gap = ts * 0.06f
+            val totalWidth = fBoxWidth + gap + entonWidth
             val startX = centerX - totalWidth / 2f
-
-            // Draw "F" in red
-            canvas.drawText("F", startX, brandY, fentonRedPaint)
-            // Draw "ENTON" in white
-            canvas.drawText("ENTON", startX + fWidth, brandY, fentonTextPaint)
+            val fontMetrics = fentonRedPaint.fontMetrics
+            val textTop = brandY + fontMetrics.ascent
+            val textBottom = brandY + fontMetrics.descent
+            val boxPadV = ts * 0.06f
+            canvas.drawRect(
+                startX, textTop - boxPadV,
+                startX + fBoxWidth, textBottom + boxPadV,
+                Paint().apply {
+                    color = fentonRed
+                    isAntiAlias = true
+                    style = Paint.Style.FILL
+                }
+            )
+            canvas.drawText("F", startX + fBoxWidth / 2f, brandY, fentonRedPaint)
+            canvas.drawText("ENTON", startX + fBoxWidth + gap, brandY, fentonTextPaint)
         }
 
         private fun drawDateWindow(canvas: Canvas) {
-            // Position at 3 o'clock
-            val dateX = centerX + radius * 0.32f
+            val dateX = centerX + radius * 0.35f
             val dateY = centerY
-            val boxWidth = radius * 0.22f
-            val boxHeight = radius * 0.10f
-
-            // Date box background
+            val boxWidth = radius * 0.28f
+            val boxHeight = radius * 0.13f
             val rect = RectF(
                 dateX - boxWidth / 2f, dateY - boxHeight / 2f,
                 dateX + boxWidth / 2f, dateY + boxHeight / 2f
             )
-
-            // Box with slight rounding
             canvas.drawRoundRect(rect, 3f, 3f, dateBoxPaint)
-
-            // Border
-            val borderPaint = Paint().apply {
+            canvas.drawRoundRect(rect, 3f, 3f, Paint().apply {
                 color = silverShadow
                 isAntiAlias = true
                 style = Paint.Style.STROKE
                 strokeWidth = 1f
-            }
-            canvas.drawRoundRect(rect, 3f, 3f, borderPaint)
-
-            // Date text
+            })
             val dayOfWeek = calendar.getDisplayName(Calendar.DAY_OF_WEEK, Calendar.SHORT, java.util.Locale.getDefault())?.uppercase() ?: "MON"
             val dayOfMonth = calendar.get(Calendar.DAY_OF_MONTH)
-            val dateStr = "$dayOfWeek $dayOfMonth"
-
-            dateTextPaint.textSize = boxHeight * 0.65f
-            canvas.drawText(dateStr, dateX, dateY + dateTextPaint.textSize / 3f, dateTextPaint)
+            dateTextPaint.textSize = boxHeight * 0.60f
+            canvas.drawText("$dayOfWeek $dayOfMonth", dateX, dateY + dateTextPaint.textSize / 3f, dateTextPaint)
         }
 
         private fun drawHands(canvas: Canvas) {
             val hours = calendar.get(Calendar.HOUR)
             val minutes = calendar.get(Calendar.MINUTE)
             val seconds = calendar.get(Calendar.SECOND)
-
-            val hourAngle = Math.toRadians(
-                ((hours + minutes / 60f) * 30f - 90f).toDouble()
+            val hourAngleDeg = (hours + minutes / 60f) * 30f - 90f
+            val minuteAngleDeg = (minutes + seconds / 60f) * 6f - 90f
+            val secondAngleDeg = seconds * 6f - 90f
+            drawDiamondHand(canvas, hourAngleDeg, radius * 0.48f, radius * 0.045f, radius * 0.12f, hourHandPaint)
+            drawDiamondHand(canvas, minuteAngleDeg, radius * 0.68f, radius * 0.035f, radius * 0.12f, minuteHandPaint)
+            val secAngle = Math.toRadians(secondAngleDeg.toDouble())
+            canvas.drawLine(
+                centerX - cos(secAngle).toFloat() * (radius * 0.18f),
+                centerY - sin(secAngle).toFloat() * (radius * 0.18f),
+                centerX + cos(secAngle).toFloat() * (radius * 0.72f),
+                centerY + sin(secAngle).toFloat() * (radius * 0.72f),
+                secondHandPaint
             )
-            val minuteAngle = Math.toRadians(
-                ((minutes + seconds / 60f) * 6f - 90f).toDouble()
-            )
-            val secondAngle = Math.toRadians((seconds * 6f - 90f).toDouble())
-
-            // Apply lighting to hands
-            val hourHandLen = radius * 0.45f
-            val minuteHandLen = radius * 0.65f
-            val secondHandLen = radius * 0.70f
-
-            // Hour hand with metallic shading
-            drawMetallicHand(canvas, centerX, centerY, hourAngle, hourHandLen, hourHandPaint, 6f)
-
-            // Minute hand with metallic shading
-            drawMetallicHand(canvas, centerX, centerY, minuteAngle, minuteHandLen, minuteHandPaint, 4f)
-
-            // Second hand (thin, white)
-            val secEndX = centerX + cos(secondAngle).toFloat() * secondHandLen
-            val secEndY = centerY + sin(secondAngle).toFloat() * secondHandLen
-            val secTailX = centerX - cos(secondAngle).toFloat() * (radius * 0.15f)
-            val secTailY = centerY - sin(secondAngle).toFloat() * (radius * 0.15f)
-            canvas.drawLine(secTailX, secTailY, secEndX, secEndY, secondHandPaint)
         }
 
-        private fun drawMetallicHand(
-            canvas: Canvas, cx: Float, cy: Float,
-            angle: Double, length: Float, basePaint: Paint, width: Float
+        private fun drawDiamondHand(
+            canvas: Canvas, angleDeg: Float, length: Float,
+            halfWidth: Float, tailLength: Float, basePaint: Paint
         ) {
-            // Create a metallic gradient along the hand
-            val endX = cx + cos(angle).toFloat() * length
-            val endY = cy + sin(angle).toFloat() * length
-
-            // Perpendicular direction for gradient
-            val perpAngle = angle + Math.PI / 2
-            val gradOffset = width * 1.5f
-            val gx1 = cx + cos(perpAngle).toFloat() * gradOffset
-            val gy1 = cy + sin(perpAngle).toFloat() * gradOffset
-            val gx2 = cx - cos(perpAngle).toFloat() * gradOffset
-            val gy2 = cy - sin(perpAngle).toFloat() * gradOffset
-
-            val metallicPaint = Paint(basePaint).apply {
-                strokeWidth = width
+            val angleRad = Math.toRadians(angleDeg.toDouble())
+            val perpRad = angleRad + Math.PI / 2
+            val cosA = cos(angleRad).toFloat()
+            val sinA = sin(angleRad).toFloat()
+            val cosP = cos(perpRad).toFloat()
+            val sinP = sin(perpRad).toFloat()
+            val tipX = centerX + cosA * length
+            val tipY = centerY + sinA * length
+            val tailX = centerX - cosA * tailLength
+            val tailY = centerY - sinA * tailLength
+            val wideX = centerX + cosA * (length * 0.35f)
+            val wideY = centerY + sinA * (length * 0.35f)
+            val path = Path().apply {
+                moveTo(tailX, tailY)
+                lineTo(wideX + cosP * halfWidth, wideY + sinP * halfWidth)
+                lineTo(tipX, tipY)
+                lineTo(wideX - cosP * halfWidth, wideY - sinP * halfWidth)
+                close()
+            }
+            val fillPaint = Paint(basePaint).apply {
+                style = Paint.Style.FILL
                 shader = LinearGradient(
-                    gx1, gy1, gx2, gy2,
+                    centerX + cosP * halfWidth * 3f, centerY + sinP * halfWidth * 3f,
+                    centerX - cosP * halfWidth * 3f, centerY - sinP * halfWidth * 3f,
                     intArrayOf(silverShadow, silverHighlight, Color.WHITE, silverHighlight, silverShadow),
                     floatArrayOf(0f, 0.25f, 0.5f, 0.75f, 1f),
                     Shader.TileMode.CLAMP
                 )
             }
-
-            canvas.drawLine(cx, cy, endX, endY, metallicPaint)
-
-            // Luminous tip effect
-            val tipLen = length * 0.15f
-            val tipStartX = endX - cos(angle).toFloat() * tipLen
-            val tipStartY = endY - sin(angle).toFloat() * tipLen
-            val tipPaint = Paint().apply {
+            canvas.drawPath(path, fillPaint)
+            canvas.drawPath(path, Paint().apply {
+                color = 0xFF404040.toInt()
                 isAntiAlias = true
                 style = Paint.Style.STROKE
-                strokeWidth = width - 1f
-                strokeCap = Paint.Cap.ROUND
-                color = Color.WHITE
-                alpha = 180
+                strokeWidth = 1f
+                strokeJoin = Paint.Join.MITER
+            })
+            val tipStartX = tipX - cosA * (length * 0.18f)
+            val tipStartY = tipY - sinA * (length * 0.18f)
+            val tipPath = Path().apply {
+                moveTo(tipStartX + cosP * halfWidth * 0.3f, tipStartY + sinP * halfWidth * 0.3f)
+                lineTo(tipX, tipY)
+                lineTo(tipStartX - cosP * halfWidth * 0.3f, tipStartY - sinP * halfWidth * 0.3f)
+                close()
             }
-            canvas.drawLine(tipStartX, tipStartY, endX, endY, tipPaint)
+            canvas.drawPath(tipPath, Paint().apply {
+                isAntiAlias = true
+                style = Paint.Style.FILL
+                color = Color.WHITE
+                alpha = 140
+            })
         }
 
         private fun playTickSound() {
@@ -752,11 +733,8 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
 
         private fun drawAmbient(canvas: Canvas, bounds: Rect) {
             canvas.drawColor(Color.BLACK)
-
             val hours = calendar.get(Calendar.HOUR)
             val minutes = calendar.get(Calendar.MINUTE)
-
-            // Simple hour markers
             val ambientMarkerPaint = Paint().apply {
                 color = Color.WHITE
                 isAntiAlias = false
@@ -765,8 +743,8 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
             }
             for (i in 0 until 12) {
                 val angle = Math.toRadians((i * 30 - 90).toDouble())
-                val outerR = radius - 18f
-                val innerR = radius - 30f
+                val outerR = radius - 10f
+                val innerR = radius - 24f
                 canvas.drawLine(
                     centerX + cos(angle).toFloat() * innerR,
                     centerY + sin(angle).toFloat() * innerR,
@@ -775,40 +753,28 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
                     ambientMarkerPaint
                 )
             }
-
-            // Hour hand
-            val hourAngle = Math.toRadians(
-                ((hours + minutes / 60f) * 30f - 90f).toDouble()
-            )
-            val hourLen = radius * 0.45f
-            val ambientHourPaint = Paint(ambientPaint).apply { strokeWidth = 4f }
+            val hourAngle = Math.toRadians(((hours + minutes / 60f) * 30f - 90f).toDouble())
             canvas.drawLine(
                 centerX, centerY,
-                centerX + cos(hourAngle).toFloat() * hourLen,
-                centerY + sin(hourAngle).toFloat() * hourLen,
-                ambientHourPaint
+                centerX + cos(hourAngle).toFloat() * radius * 0.48f,
+                centerY + sin(hourAngle).toFloat() * radius * 0.48f,
+                Paint(ambientPaint).apply { strokeWidth = 5f }
             )
-
-            // Minute hand
             val minuteAngle = Math.toRadians((minutes * 6f - 90f).toDouble())
-            val minuteLen = radius * 0.65f
             canvas.drawLine(
                 centerX, centerY,
-                centerX + cos(minuteAngle).toFloat() * minuteLen,
-                centerY + sin(minuteAngle).toFloat() * minuteLen,
+                centerX + cos(minuteAngle).toFloat() * radius * 0.68f,
+                centerY + sin(minuteAngle).toFloat() * radius * 0.68f,
                 ambientPaint
             )
-
-            // Date text in ambient
             val dayOfWeek = calendar.getDisplayName(Calendar.DAY_OF_WEEK, Calendar.SHORT, java.util.Locale.getDefault())?.uppercase() ?: "MON"
             val dayOfMonth = calendar.get(Calendar.DAY_OF_MONTH)
-            val ambientDatePaint = Paint().apply {
+            canvas.drawText("$dayOfWeek $dayOfMonth", centerX + radius * 0.35f, centerY + radius * 0.03f, Paint().apply {
                 color = Color.WHITE
                 isAntiAlias = false
-                textSize = radius * 0.08f
+                textSize = radius * 0.09f
                 textAlign = Paint.Align.CENTER
-            }
-            canvas.drawText("$dayOfWeek $dayOfMonth", centerX + radius * 0.32f, centerY + ambientDatePaint.textSize / 3f, ambientDatePaint)
+            })
         }
 
         override fun onPropertiesChanged(properties: Bundle) {
@@ -833,10 +799,7 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
 
         override fun onTapCommand(tapType: Int, x: Int, y: Int, eventTime: Long) {
             when (tapType) {
-                WatchFaceService.TAP_TYPE_TAP -> {
-                    // Could toggle sound or open config
-                    invalidate()
-                }
+                WatchFaceService.TAP_TYPE_TAP -> invalidate()
             }
         }
 
@@ -847,12 +810,10 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
 
         override fun onVisibilityChanged(visible: Boolean) {
             super.onVisibilityChanged(visible)
-
             if (visible) {
                 registerReceiver()
                 registerSensor()
                 calendar.timeZone = TimeZone.getDefault()
-                // Reload color preference
                 dialColor = prefs.getInt(KEY_DIAL_COLOR, DEFAULT_DIAL_COLOR)
                 dialPaint.color = dialColor
                 subDialPaint.color = adjustAlpha(dialColor, 200)
@@ -862,15 +823,13 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
                 unregisterReceiver()
                 unregisterSensor()
             }
-
             updateTimer()
         }
 
         private fun registerReceiver() {
             if (registeredTimeZoneReceiver) return
             registeredTimeZoneReceiver = true
-            val filter = IntentFilter(Intent.ACTION_TIMEZONE_CHANGED)
-            this@FentonWatchFaceService.registerReceiver(timeZoneReceiver, filter)
+            this@FentonWatchFaceService.registerReceiver(timeZoneReceiver, IntentFilter(Intent.ACTION_TIMEZONE_CHANGED))
         }
 
         private fun unregisterReceiver() {
@@ -881,7 +840,7 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
 
         private fun registerSensor() {
             accelerometer?.let {
-                sensorManager?.registerListener(sensorListener, it, SensorManager.SENSOR_DELAY_UI)
+                sensorManager?.registerListener(sensorListener, it, SensorManager.SENSOR_DELAY_GAME)
             }
         }
 
@@ -917,7 +876,6 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
             super.onDestroy()
         }
 
-        // Utility functions
         private fun adjustAlpha(color: Int, alpha: Int): Int {
             return Color.argb(alpha, Color.red(color), Color.green(color), Color.blue(color))
         }
