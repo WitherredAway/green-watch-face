@@ -6,6 +6,10 @@ import android.content.Intent
 import android.content.IntentFilter
 import android.content.SharedPreferences
 import android.graphics.*
+import android.hardware.Sensor
+import android.hardware.SensorEvent
+import android.hardware.SensorEventListener
+import android.hardware.SensorManager
 import android.media.AudioAttributes
 import android.media.SoundPool
 import android.os.Bundle
@@ -66,8 +70,6 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
         private lateinit var dialPaint: Paint
         private lateinit var dialGradientPaint: Paint
         private lateinit var dialMetallicPaint: Paint
-        private lateinit var bezelPaint: Paint
-        private lateinit var bezelHighlightPaint: Paint
         private lateinit var hourMarkerPaint: Paint
         private lateinit var minuteMarkerPaint: Paint
         private lateinit var hourHandPaint: Paint
@@ -91,8 +93,27 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
         private var soundEnabled = true
         private var lastTickSecond = -1
 
-        // Light angle simulation (based on accelerometer or time-based)
-        private var lightAngle = 315f // Default: upper-left light source
+        // Accelerometer-driven light angle for real-time metallic effect
+        private var lightAngle = 315f
+        private var sensorManager: SensorManager? = null
+        private var accelerometer: Sensor? = null
+        private val sensorListener = object : SensorEventListener {
+            override fun onSensorChanged(event: SensorEvent) {
+                if (event.sensor.type == Sensor.TYPE_ACCELEROMETER) {
+                    val x = event.values[0]
+                    val y = event.values[1]
+                    // Map accelerometer tilt to light angle
+                    val newAngle = (Math.toDegrees(atan2(y.toDouble(), x.toDouble())).toFloat() + 360f) % 360f
+                    // Smooth the transition
+                    lightAngle = lightAngle + 0.3f * ((newAngle - lightAngle + 540f) % 360f - 180f)
+                    lightAngle = (lightAngle + 360f) % 360f
+                    if (!isAmbient) {
+                        invalidate()
+                    }
+                }
+            }
+            override fun onAccuracyChanged(sensor: Sensor?, accuracy: Int) {}
+        }
 
         private val updateTimeHandler = UpdateTimeHandler(this)
 
@@ -120,6 +141,12 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
 
             initPaints()
             initSound()
+            initSensor()
+        }
+
+        private fun initSensor() {
+            sensorManager = getSystemService(Context.SENSOR_SERVICE) as? SensorManager
+            accelerometer = sensorManager?.getDefaultSensor(Sensor.TYPE_ACCELEROMETER)
         }
 
         private fun initPaints() {
@@ -139,20 +166,6 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
                 isAntiAlias = true
                 style = Paint.Style.FILL
                 alpha = 140  // semi-transparent metallic overlay
-            }
-
-            // Bezel / chrome ring
-            bezelPaint = Paint().apply {
-                color = silverColor
-                isAntiAlias = true
-                style = Paint.Style.STROKE
-                strokeWidth = 12f
-            }
-
-            bezelHighlightPaint = Paint().apply {
-                isAntiAlias = true
-                style = Paint.Style.STROKE
-                strokeWidth = 12f
             }
 
             // Hour markers
@@ -363,7 +376,6 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
             centerY = height / 2f
             radius = min(centerX, centerY)
             updateDialGradient()
-            updateBezelShader()
         }
 
         private fun updateDialGradient() {
@@ -400,31 +412,10 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
             }
         }
 
-        private fun updateBezelShader() {
-            // Angular gradient for metallic bezel effect
-            val lightRad = Math.toRadians(lightAngle.toDouble()).toFloat()
-            bezelHighlightPaint.shader = SweepGradient(
-                centerX, centerY,
-                intArrayOf(
-                    silverShadow, silverHighlight, Color.WHITE, silverHighlight,
-                    silverShadow, darkSilver, silverShadow
-                ),
-                floatArrayOf(0f, 0.15f, 0.25f, 0.35f, 0.5f, 0.75f, 1f)
-            ).apply {
-                val matrix = Matrix()
-                matrix.setRotate(lightAngle, centerX, centerY)
-                setLocalMatrix(matrix)
-            }
-        }
-
         override fun onDraw(canvas: Canvas, bounds: Rect) {
             calendar.timeInMillis = System.currentTimeMillis()
 
-            // Slowly rotate light angle based on seconds for dynamic effect
-            val seconds = calendar.get(Calendar.SECOND)
-            val millis = calendar.get(Calendar.MILLISECOND)
-            lightAngle = (315f + (seconds * 6f + millis * 0.006f) * 0.5f) % 360f
-            updateBezelShader()
+            // Update metallic dial effect based on current light angle (driven by accelerometer)
             updateDialMetallic()
 
             if (isAmbient) {
@@ -442,10 +433,7 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
             // Background: black
             canvas.drawColor(Color.BLACK)
 
-            // Draw outer silver bezel with lighting
-            drawBezel(canvas)
-
-            // Draw dial background with gradient
+            // Draw dial background with metallic gradient
             drawDial(canvas)
 
             // Draw minute tick marks
@@ -476,36 +464,8 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
             })
         }
 
-        private fun drawBezel(canvas: Canvas) {
-            val bezelRadius = radius - 6f
-
-            // Draw base silver bezel
-            canvas.drawCircle(centerX, centerY, bezelRadius, bezelPaint)
-
-            // Draw highlight sweep gradient over bezel for angle-wise lighting
-            canvas.drawCircle(centerX, centerY, bezelRadius, bezelHighlightPaint)
-
-            // Inner bezel edge (thin dark line for depth)
-            val innerEdgePaint = Paint().apply {
-                color = 0xFF404040.toInt()
-                isAntiAlias = true
-                style = Paint.Style.STROKE
-                strokeWidth = 1f
-            }
-            canvas.drawCircle(centerX, centerY, bezelRadius - 6f, innerEdgePaint)
-
-            // Outer bezel edge
-            val outerEdgePaint = Paint().apply {
-                color = 0xFF606060.toInt()
-                isAntiAlias = true
-                style = Paint.Style.STROKE
-                strokeWidth = 1f
-            }
-            canvas.drawCircle(centerX, centerY, bezelRadius + 6f, outerEdgePaint)
-        }
-
         private fun drawDial(canvas: Canvas) {
-            val dialRadius = radius - 14f
+            val dialRadius = radius - 2f
             // Base fill
             canvas.drawCircle(centerX, centerY, dialRadius, dialPaint)
             // Radial depth gradient
@@ -515,8 +475,8 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
         }
 
         private fun drawMinuteMarks(canvas: Canvas) {
-            val outerRadius = radius - 18f
-            val innerRadius = radius - 24f
+            val outerRadius = radius - 6f
+            val innerRadius = radius - 12f
             for (i in 0 until 60) {
                 if (i % 5 == 0) continue // skip hour positions
                 val angle = Math.toRadians((i * 6 - 90).toDouble())
@@ -529,21 +489,15 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
         }
 
         private fun drawHourMarkers(canvas: Canvas) {
-            val outerRadius = radius - 18f
-            val innerRadius = radius - 32f
+            val outerRadius = radius - 6f
+            val innerRadius = radius - 20f
 
             for (i in 0 until 12) {
                 val angle = Math.toRadians((i * 30 - 90).toDouble())
                 val cos = cos(angle).toFloat()
                 val sin = sin(angle).toFloat()
 
-                // Calculate lighting intensity based on marker angle vs light source
-                val markerAngle = (i * 30f + 360f) % 360f
-                val angleDiff = abs(((markerAngle - lightAngle + 180f) % 360f) - 180f)
-                val lightIntensity = 1f - (angleDiff / 180f) * 0.5f
-
                 val markerPaint = Paint(hourMarkerPaint).apply {
-                    color = blendColor(silverShadow, Color.WHITE, lightIntensity)
                     strokeWidth = if (i == 0 || i == 3 || i == 6 || i == 9) 5f else 4f
                 }
 
@@ -896,6 +850,7 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
 
             if (visible) {
                 registerReceiver()
+                registerSensor()
                 calendar.timeZone = TimeZone.getDefault()
                 // Reload color preference
                 dialColor = prefs.getInt(KEY_DIAL_COLOR, DEFAULT_DIAL_COLOR)
@@ -905,6 +860,7 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
                 invalidate()
             } else {
                 unregisterReceiver()
+                unregisterSensor()
             }
 
             updateTimer()
@@ -921,6 +877,16 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
             if (!registeredTimeZoneReceiver) return
             registeredTimeZoneReceiver = false
             this@FentonWatchFaceService.unregisterReceiver(timeZoneReceiver)
+        }
+
+        private fun registerSensor() {
+            accelerometer?.let {
+                sensorManager?.registerListener(sensorListener, it, SensorManager.SENSOR_DELAY_UI)
+            }
+        }
+
+        private fun unregisterSensor() {
+            sensorManager?.unregisterListener(sensorListener)
         }
 
         private fun updateTimer() {
@@ -945,6 +911,7 @@ class FentonWatchFaceService : CanvasWatchFaceService() {
 
         override fun onDestroy() {
             updateTimeHandler.removeMessages(MSG_UPDATE_TIME)
+            unregisterSensor()
             soundPool?.release()
             soundPool = null
             super.onDestroy()
